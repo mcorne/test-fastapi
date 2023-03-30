@@ -1,0 +1,19 @@
+# https://www.python.org/downloads/
+# install python
+
+# https://code.visualstudio.com/docs/python/environments
+Command Palette
+Python: Create Environment
+Select Venv etc.
+
+cd C:\Data\vscode\test-fastapi
+# start new terminal to verify prompt is prefixed with (.venv)
+
+# Install packages
+pip install wheel
+pip install black
+pip install "fastapi[all]"
+
+# Run
+uvicorn main:app --reload
+# http://127.0.0.1:8000
