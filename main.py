@@ -1,15 +1,21 @@
 from enum import Enum
 from typing import Annotated
 
-from fastapi import FastAPI, Query
-from pydantic import BaseModel
+from fastapi import Body, FastAPI, Path, Query
+from pydantic import BaseModel, Field, HttpUrl
+
+
+class Image(BaseModel):
+    url: HttpUrl
+    name: str
 
 
 class Item(BaseModel):
     name: str
-    description: str | None = None
-    price: float
+    description: str | None = Field(default=None, title="The description of the item", max_length=300)
+    price: float = Field(gt=0, description="The price must be greater than zero")
     tax: float | None = None
+    images: list[Image] | None = None
 
 
 class ModelName(Enum):
@@ -18,26 +24,55 @@ class ModelName(Enum):
     lenet = "lenet"
 
 
+class Offer(BaseModel):
+    name: str
+    description: str | None = None
+    price: float
+    items: list[Item]
+
+
+class User(BaseModel):
+    username: str
+    full_name: str | None = None
+
+
 app = FastAPI()
 
 fake_items_db = [{"item_name": "Foo"}, {"item_name": "Bar"}, {"item_name": "Baz"}]
 
 
 @app.put("/items/{item_id}")
-async def change_item(item_id: int, item: Item, q: str | None = None):
-    result = {"item_id": item_id, **item.dict()}
+async def change_item(
+    item_id: int,
+    item: Item | None = None,
+    user: User = None,
+    importance: Annotated[int, Body()] = None,
+    q: str | None = None,
+):
+    results = {"item_id": item_id}
     if q:
-        result.update({"q": q})
-    return result
+        results.update({"q": q})
+    if item:
+        results.update({"item": item})
+    if user:
+        results.update({"user": user})
+    if importance:
+        results.update({"importance": importance})
+    return results
 
 
 @app.post("/items/")
-async def create_item(item: Item):
+async def create_item(item: Annotated[Item, Body(embed=True)]):
     item_dict = item.dict()
     if item.tax:
         price_with_tax = item.price + item.tax
         item_dict.update({"price_with_tax": price_with_tax})
     return item_dict
+
+
+@app.post("/offers/")
+async def create_offer(offer: Offer):
+    return offer
 
 
 @app.get("/models/{model_name}")
@@ -52,7 +87,11 @@ async def get_model(model_name: ModelName):
 
 
 @app.get("/items/{item_id}")
-async def read_item(item_id: str, q: str | None = None, short: bool = False):
+async def read_item(
+    item_id: Annotated[int, Path(title="The ID of the item to get", gt=1, le=1000)],
+    q: Annotated[str | None, Query(alias="item-query")] = None,
+    short: bool = False,
+):
     item = {"item_id": item_id}
     if q:
         item.update({"q": q})
