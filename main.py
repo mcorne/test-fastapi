@@ -1,14 +1,15 @@
 from enum import Enum
 from typing import Annotated, Any
 
-from fastapi import Body, FastAPI, HTTPException, Path, Query, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
 
 
-class Tags(Enum):
-    items = "items"
-    users = "users"
+class BaseUser(BaseModel):
+    username: str
+    email: EmailStr
+    full_name: str | None = None
 
 
 class Image(BaseModel):
@@ -38,14 +39,27 @@ class Offer(BaseModel):
     items: list[Item]
 
 
-class BaseUser(BaseModel):
-    username: str
-    email: EmailStr
-    full_name: str | None = None
+class Tags(Enum):
+    items = "items"
+    users = "users"
 
 
 class UserIn(BaseUser):
     password: str
+
+
+class CommonQueryParams:
+    def __init__(self, q: str | None = None, skip: int = 0, limit: int = 100):
+        self.q = q
+        self.skip = skip
+        self.limit = limit
+
+
+async def common_parameters(q: str | None = None, skip: int = 0, limit: int = 100):
+    return {"q": q, "skip": skip, "limit": limit}
+
+
+CommonsDep = Annotated[dict, Depends(common_parameters)]
 
 
 app = FastAPI()
@@ -87,7 +101,7 @@ async def create_offer(offer: Offer):
     return offer
 
 
-@app.post("/user/", status_code=status.HTTP_201_CREATED)
+@app.post("/user/", status_code=status.HTTP_201_CREATED, tags=[Tags.users])
 async def create_user(user: UserIn) -> BaseUser:
     return user
 
@@ -110,7 +124,12 @@ async def get_portal(teleport: bool = False) -> Response | dict:
     return {"message": "Here's your interdimensional portal."}
 
 
-@app.get("/items/{item_id}")
+@app.get("/users/", tags=[Tags.users])
+async def read_users(commons: CommonsDep):
+    return commons
+
+
+@app.get("/items/{item_id}", tags=[Tags.items])
 async def read_item(
     item_id: Annotated[int, Path(title="The ID of the item to get", gt=1, le=1000)],
     q: Annotated[str | None, Query(alias="item-query")] = None,
@@ -130,7 +149,7 @@ async def read_item(
     return item
 
 
-@app.get("/items/")
+@app.get("/items/", tags=[Tags.items])
 async def read_items(
     skip: int = 0,
     limit: int = 10,
@@ -145,12 +164,16 @@ async def read_items(
         ),
     ] = None,
     z: Annotated[list[str] | None, Query()] = ["foo", "bar"],
+    # commons: Annotated[CommonQueryParams, Depends(CommonQueryParams)] = None,
+    commons: Annotated[CommonQueryParams, Depends()] = None,  # shortcut
 ):
     results = {"items": fake_items_db[skip : skip + limit]}
     if q:
         results.update({"q": q})
     if z:
         results.update({"z": z})
+    if commons:
+        results.update({"commons": commons})
     return results
 
 
