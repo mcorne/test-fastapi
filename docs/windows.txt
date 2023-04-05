@@ -13,6 +13,8 @@ cd C:\Data\vscode\test-fastapi
 pip install wheel
 pip install black
 pip install "fastapi[all]"
+pip install "python-jose[cryptography]"
+pip install "passlib[bcrypt]"
 
 # Run
 uvicorn main:app --reload
