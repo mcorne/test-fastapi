@@ -8,6 +8,10 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr, Field, HttpUrl
+from sqlalchemy.orm import Session
+
+from sql_app import crud, models, schemas
+from sql_app.database import SessionLocal, engine
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -134,6 +138,14 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -174,27 +186,14 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 
+models.Base.metadata.create_all(bind=engine)
+
 app = FastAPI()
 
 
-@app.put("/items/{item_id}", tags=[Tags.items])
-async def change_item(
-    item_id: int,
-    item: Item | None = None,
-    user: BaseUser = None,
-    importance: Annotated[int, Body()] = None,
-    q: str | None = None,
-):
-    results = {"item_id": item_id}
-    if q:
-        results.update({"q": q})
-    if item:
-        results.update({"item": item})
-    if user:
-        results.update({"user": user})
-    if importance:
-        results.update({"importance": importance})
-    return results
+@app.get("/")
+async def root():
+    return {"message": "Hello World"}
 
 
 @app.post("/items/", response_model=Item, tags=[Tags.items])
@@ -206,74 +205,13 @@ async def create_item(item: Annotated[Item, Body(embed=True)]) -> dict:
     return item_dict
 
 
-@app.post("/offers/")
-async def create_offer(offer: Offer):
-    return offer
+@app.get("/items/", response_model=list[schemas.Item])
+def read_items(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    items = crud.get_items(db, skip=skip, limit=limit)
+    return items
 
 
-@app.post("/user/", status_code=status.HTTP_201_CREATED, tags=[Tags.users])
-async def create_user(user: UserIn) -> BaseUser:
-    return user
-
-
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
-    return {"access_token": access_token, "token_type": "bearer"}
-
-
-@app.get("/models/{model_name}")
-async def get_model(model_name: ModelName):
-    if model_name is ModelName.alexnet:
-        return {"model_name": model_name, "message": "Deep Learning FTW!"}
-
-    if model_name.value == "lenet":
-        return {"model_name": model_name, "message": "LeCNN all the images"}
-
-    return {"model_name": model_name, "message": "Have some residuals"}
-
-
-@app.get("/portal", response_model=None)
-async def get_portal(teleport: bool = False) -> Response | dict:
-    if teleport:
-        return RedirectResponse(url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-    return {"message": "Here's your interdimensional portal."}
-
-
-@app.get("/users/", tags=[Tags.users])
-async def read_users(commons: CommonsDep):
-    return commons
-
-
-@app.get("/items/{item_id}", tags=[Tags.items])
-async def read_item(
-    item_id: Annotated[int, Path(title="The ID of the item to get", gt=1, le=1000)],
-    q: Annotated[str | None, Query(alias="item-query")] = None,
-    short: bool = False,
-):
-    if item_id == 999:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Item 999 forbidden",
-            headers={"X-Error": "There goes my error"},
-        )
-    item = {"item_id": item_id}
-    if q:
-        item.update({"q": q})
-    if not short:
-        item.update({"description": "This is an amazing item that has a long description"})
-    return item
-
-
-@app.get("/items/", tags=[Tags.items])
+@app.get("/items2/", tags=[Tags.items])
 async def read_items(
     skip: int = 0,
     limit: int = 10,
@@ -301,9 +239,113 @@ async def read_items(
     return results
 
 
+@app.get("/items/{item_id}", tags=[Tags.items])
+async def read_item(
+    item_id: Annotated[int, Path(title="The ID of the item to get", gt=1, le=1000)],
+    q: Annotated[str | None, Query(alias="item-query")] = None,
+    short: bool = False,
+):
+    if item_id == 999:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Item 999 forbidden",
+            headers={"X-Error": "There goes my error"},
+        )
+    item = {"item_id": item_id}
+    if q:
+        item.update({"q": q})
+    if not short:
+        item.update({"description": "This is an amazing item that has a long description"})
+    return item
+
+
+@app.put("/items/{item_id}", tags=[Tags.items])
+async def change_item(
+    item_id: int,
+    item: Item | None = None,
+    user: BaseUser = None,
+    importance: Annotated[int, Body()] = None,
+    q: str | None = None,
+):
+    results = {"item_id": item_id}
+    if q:
+        results.update({"q": q})
+    if item:
+        results.update({"item": item})
+    if user:
+        results.update({"user": user})
+    if importance:
+        results.update({"importance": importance})
+    return results
+
+
 @app.get("/files/{file_path:path}")
 async def read_file(file_path: str):
     return {"file_path": file_path}
+
+
+@app.get("/models/{model_name}")
+async def get_model(model_name: ModelName):
+    if model_name is ModelName.alexnet:
+        return {"model_name": model_name, "message": "Deep Learning FTW!"}
+
+    if model_name.value == "lenet":
+        return {"model_name": model_name, "message": "LeCNN all the images"}
+
+    return {"model_name": model_name, "message": "Have some residuals"}
+
+
+@app.post("/offers/")
+async def create_offer(offer: Offer):
+    return offer
+
+
+@app.get("/portal", response_model=None)
+async def get_portal(teleport: bool = False) -> Response | dict:
+    if teleport:
+        return RedirectResponse(url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    return {"message": "Here's your interdimensional portal."}
+
+
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    user = authenticate_user(fake_users_db, form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.post("/users/", response_model=schemas.User, tags=[Tags.users])
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    db_user = crud.get_user_by_email(db, email=user.email)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    return crud.create_user(db=db, user=user)
+
+
+@app.get("/users/", response_model=list[schemas.User], tags=[Tags.users])
+def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    users = crud.get_users(db, skip=skip, limit=limit)
+    return users
+
+
+@app.get("/users/{user_id}", response_model=schemas.User, tags=[Tags.users])
+def read_user(user_id: int, db: Session = Depends(get_db)):
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
+
+
+@app.post("/users/{user_id}/items/", response_model=schemas.Item, tags=[Tags.users])
+def create_item_for_user(user_id: int, item: schemas.ItemCreate, db: Session = Depends(get_db)):
+    return crud.create_user_item(db=db, item=item, user_id=user_id)
 
 
 @app.get("/users/me", tags=[Tags.users])
@@ -311,11 +353,6 @@ async def read_users_me(current_user: Annotated[User, Depends(get_current_active
     return current_user
 
 
-@app.get("/users/me/items/")
+@app.get("/users/me/items/", tags=[Tags.users])
 async def read_own_items(current_user: Annotated[User, Depends(get_current_active_user)]):
     return [{"item_id": "Foo", "owner": current_user.username}]
-
-
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
